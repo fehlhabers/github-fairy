@@ -8,9 +8,9 @@ query = """{ "query" : "query {
         remaining
         resetAt
       }
-      organization (login: 'ORGANIZATION') {
+      organization (login: \\"ORGANIZATION\\") {
         name
-        team (slug: 'TEAM') {
+        team (slug: \\"TEAM\\") {
           name
           repositories (first: 100 ) {
             edges {
@@ -45,8 +45,6 @@ organization = sys.argv[1]
 team = sys.argv[2]
 
 query = query.replace('\n', '')
-query = query.replace("'", "\\\"")
-
 query = query.replace("ORGANIZATION", organization)
 query = query.replace("TEAM", team)
 
@@ -56,5 +54,6 @@ token = sys.stdin.read()
 headers = {"Authorization": "Bearer " + token,
            "Content-Type": "application/json"}
 
+print(query)
 response = requests.post(url, data=query, headers=headers)
 print(response.text)
