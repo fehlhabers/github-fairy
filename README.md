@@ -1,2 +1,2 @@
 # open-prs
-Utility to find open PRs in Github for a team
+CLI Utility to find open PRs in Github for a team written in Python
