@@ -2,7 +2,7 @@
 Utility to find open PRs in Github for a team.
 Created to learn some Python and do some good at the same time!
 
-##Configuration
+## Configuration
 Still at a very rudamental stage, so you will need to update `open-prs.sh` with your organization & team name. <br>
 A personal github token needs to be created with the following scopes:
 
@@ -22,13 +22,13 @@ You can add your token to `secret-tool` using
 ```
 Otherwise, just pipe the token into the python-script.
 
-##Usage
+## Usage
 ```commandline
 > ./open-prs.sh <sort by>
 
 EXAMPLE:
 > ./open-prs.sh date
 ```
-##Acknowledgements
+## Acknowledgements
 The solution was originally done by https://github.com/DeviesDevelopment/github-pr-tool/ <br>
 This script provides a CLI interface with similar capabilities.
