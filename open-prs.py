@@ -1,6 +1,19 @@
+#!/usr/bin/python3
+
 import requests
 import sys
+import os
 import json
+import keyring
+from getpass import getpass
+import argparse
+from jproperties import Properties
+
+PROPERTIES_FILE = 'config.properties'
+
+ORGANIZATION = "organization"
+TEAM = "team"
+SERVICE_AND_USER = "open-prs"
 
 CREATED_WIDTH = 10
 REPO_WIDTH = 20
@@ -57,7 +70,7 @@ def get_query(end_cursor=""):
 
 def github_request(complete_query):
     url = "https://api.github.com/graphql"
-    token = sys.stdin.read()
+    token = keyring.get_password(SERVICE_AND_USER, SERVICE_AND_USER)
     headers = {"Authorization": "Bearer " + token,
                "Content-Type": "application/json"}
     return requests.post(url, data=complete_query, headers=headers)
@@ -95,17 +108,86 @@ def print_line(pr):
     print(line)
 
 
+def parse_arguments():
+    parser.add_argument("-T", "--token", nargs='?', type=str, help="Update personal token")
+    parser.add_argument("-o", "--organization", nargs='?', type=str, help="Update organization")
+    parser.add_argument("-t", "--team", nargs='?', type=str, help="Update team")
+    parser.add_argument("-s", "--sort", nargs='?', type=str, default="createdAt",
+                        help="What to sort by (createdAt,repo,user). Default: createdAt")
+    return parser.parse_args()
+
+
+def write_configuration():
+    global config_file
+    with open(PROPERTIES_FILE, 'wb') as config_file:
+        configs[ORGANIZATION] = args.organization
+        configs[TEAM] = args.team
+        configs.store(config_file, encoding="utf-8")
+
+
+def exit_if_config_not_set():
+    if args.organization is None or args.team is None:
+        print("No configuration found or incomplete setup. Please enter both organization & team")
+        parser.print_usage()
+        sys.exit(1)
+
+
+####################################################################################
+#
+#  MAIN
+#
+####################################################################################
+
+parser = argparse.ArgumentParser()
+args = parse_arguments()
+configs = Properties()
+if not os.path.exists("open-prs.properties"):
+    exit_if_config_not_set()
+    write_configuration()
+    print("Configuration updated successfully")
+
+if args.organization is not None or args.team is not None:
+    exit_if_config_not_set()
+    write_configuration()
+    print("Configuration updated successfully")
+
+with open(PROPERTIES_FILE, 'rb') as config_file:
+    configs.load(config_file)
+    if configs.get("organization") is None or configs.get("team") is None:
+        print("Configuration missing, please enter organization & team")
+        parser.print_help()
+
+if args.token is not None:
+    yn = input("Are you sure you want to update existing token? (y/n): ")
+    if yn == "y" or yn == "Y":
+        keyring.set_password(SERVICE_AND_USER, SERVICE_AND_USER, args.token)
+
+if keyring.get_password(SERVICE_AND_USER, SERVICE_AND_USER) is None:
+    print("OpenPRs requires a personal github token to work. Please refer to the readme.")
+    print("")
+    token = getpass("Please enter personal github token: ")
+    keyring.set_password(SERVICE_AND_USER, SERVICE_AND_USER, token)
+    print("Token updated!")
+
+organization = configs.get(ORGANIZATION)[0]
+team = configs.get(TEAM)[0]
+
 query = get_query() \
-    .replace("$ORGANIZATION", sys.argv[1]) \
-    .replace("$TEAM", sys.argv[2])
-sort_by = sys.argv[3]
+    .replace("$ORGANIZATION", organization)\
+    .replace("$TEAM", team)
 
 response = github_request(query)
 
-repos = json.loads(response.text)["data"]["organization"]["team"]["repositories"]["edges"]
+try:
+    repos = json.loads(response.text)["data"]["organization"][TEAM]["repositories"]["edges"]
+except KeyError:
+    print("Unable to parse github-response. Check your config & token. Got:")
+    print(response.text)
+    sys.exit(1)
 
 pr_list = convert_response(repos)
-sorted_list = sorted(pr_list, key=lambda k: k[sort_by])
+
+sorted_list = sorted(pr_list, key=lambda k: k[args.sort])
 print_header()
 
 for pr in sorted_list:
