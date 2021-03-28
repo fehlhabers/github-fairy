@@ -47,6 +47,7 @@ def get_query(end_cursor=""):
                         login
                       }
                       createdAt
+                      reviewDecision
                     }
                   }
                 }
@@ -65,15 +66,36 @@ def get_query(end_cursor=""):
         graph_query = graph_query.replace("$AFTER", "after: " + end_cursor)
     else:
         graph_query = graph_query.replace("$AFTER", "")
-    return graph_query.replace('\n', '')
+
+    return graph_query.replace('\n', '')\
+        .replace("$ORGANIZATION", organization)\
+        .replace("$TEAM", team)
 
 
-def github_request(complete_query):
+def fetch_github_info(complete_query):
     url = "https://api.github.com/graphql"
     token = keyring.get_password(SERVICE_AND_USER, SERVICE_AND_USER)
     headers = {"Authorization": "Bearer " + token,
                "Content-Type": "application/json"}
     return requests.post(url, data=complete_query, headers=headers)
+
+
+def extract_pr_info(pr_url):
+    pr_url = pr_url.replace("https://github.com/", "")
+    pr_info = pr_url.split("/")
+    pr_info.pop(2)
+    return pr_info
+
+
+def approve_pr(pr_url):
+    pr_info = extract_pr_info(pr_url)
+    endpoint = "https://api.github.com/repo/{owner}/{repo}/pulls/{pull_nr}/reviews"
+    endpoint.format(owner= pr_info[0], repo= pr_info[1], pull_nr= pr_info[2])
+    token = keyring.get_password(SERVICE_AND_USER, SERVICE_AND_USER)
+    headers = {"Authorization": "Bearer " + token,
+               "Accept": "application/vnd.github.v3+json"}
+    body = "{\"event\": \"APPROVE\"}"
+    return requests.post(endpoint, data=body, headers=headers)
 
 
 def convert_response(repos):
@@ -104,7 +126,8 @@ def print_line(pr):
            pr["url"][0:URL_WIDTH - 2].ljust(URL_WIDTH) + \
            pr["name"][0:REPO_WIDTH - 2].ljust(REPO_WIDTH) + \
            pr["user"][0:AUTHOR_WIDTH - 2].ljust(AUTHOR_WIDTH) + \
-           pr["createdAt"][0:CREATED_WIDTH]
+           pr["createdAt"][0:CREATED_WIDTH] + \
+           pr["reviewDecision"]
     print(line)
 
 
@@ -141,19 +164,19 @@ def exit_if_config_not_set():
 parser = argparse.ArgumentParser()
 args = parse_arguments()
 configs = Properties()
-if not os.path.exists("open-prs.properties"):
+if not os.path.exists("config.properties"):
     exit_if_config_not_set()
     write_configuration()
     print("Configuration updated successfully")
-
-if args.organization is not None or args.team is not None:
-    exit_if_config_not_set()
-    write_configuration()
-    print("Configuration updated successfully")
+else:
+    if args.organization is not None or args.team is not None:
+        exit_if_config_not_set()
+        write_configuration()
+        print("Configuration updated successfully")
 
 with open(PROPERTIES_FILE, 'rb') as config_file:
     configs.load(config_file)
-    if configs.get("organization") is None or configs.get("team") is None:
+    if configs.get(ORGANIZATION) is None or configs.get("team") is None:
         print("Configuration missing, please enter organization & team")
         parser.print_help()
 
@@ -172,14 +195,18 @@ if keyring.get_password(SERVICE_AND_USER, SERVICE_AND_USER) is None:
 organization = configs.get(ORGANIZATION)[0]
 team = configs.get(TEAM)[0]
 
-query = get_query() \
-    .replace("$ORGANIZATION", organization)\
-    .replace("$TEAM", team)
-
-response = github_request(query)
+response = fetch_github_info(get_query())
 
 try:
-    repos = json.loads(response.text)["data"]["organization"][TEAM]["repositories"]["edges"]
+    repoData = json.loads(response.text)["data"][ORGANIZATION][TEAM]["repositories"]
+    moreData = repoData["pageInfo"]["hasNextPage"]
+    repos = repoData["edges"]
+    while moreData:
+        response = fetch_github_info(get_query(repoData["pageInfo"]["endCursor"]))
+        repoData = json.loads(response.text)["data"][ORGANIZATION][TEAM]["repositories"]
+        moreData = repoData["pageInfo"]["hasNextPage"]
+        repos.append(repoData["edges"])
+
 except KeyError:
     print("Unable to parse github-response. Check your config & token. Got:")
     print(response.text)
@@ -192,3 +219,4 @@ print_header()
 
 for pr in sorted_list:
     print_line(pr)
+    approve_pr(pr["url"])
