@@ -15,10 +15,10 @@ ORGANIZATION = "organization"
 TEAM = "team"
 SERVICE_AND_USER = "open-prs"
 
-CREATED_WIDTH = 10
+CREATED_WIDTH = 12
 REPO_WIDTH = 20
 AUTHOR_WIDTH = 15
-URL_WIDTH = 100
+URL_WIDTH = 80
 TITLE_WIDTH = 53
 
 
@@ -47,6 +47,7 @@ def get_query(end_cursor=""):
                         login
                       }
                       createdAt
+                      reviewDecision
                     }
                   }
                 }
@@ -65,15 +66,46 @@ def get_query(end_cursor=""):
         graph_query = graph_query.replace("$AFTER", "after: " + end_cursor)
     else:
         graph_query = graph_query.replace("$AFTER", "")
-    return graph_query.replace('\n', '')
+
+    return graph_query.replace('\n', '')\
+        .replace("$ORGANIZATION", organization)\
+        .replace("$TEAM", team)
 
 
-def github_request(complete_query):
+def fetch_github_info(complete_query):
     url = "https://api.github.com/graphql"
     token = keyring.get_password(SERVICE_AND_USER, SERVICE_AND_USER)
     headers = {"Authorization": "Bearer " + token,
                "Content-Type": "application/json"}
     return requests.post(url, data=complete_query, headers=headers)
+
+
+def extract_pr_info(pr_url):
+    pr_url = pr_url.replace("https://github.com/", "")
+    pr_info = pr_url.split("/")
+    pr_info.pop(2)
+    return pr_info
+
+
+def approve_pr(pr_url):
+    pr_info = extract_pr_info(pr_url)
+    endpoint = "https://api.github.com/repos/{owner}/{repo}/pulls/{pull_nr}/reviews"
+    endpoint = endpoint.format(owner=pr_info[0], repo=pr_info[1], pull_nr=pr_info[2])
+    token = keyring.get_password(SERVICE_AND_USER, SERVICE_AND_USER)
+    headers = {"Authorization": "Bearer " + token,
+               "Accept": "application/vnd.github.v3+json"}
+    body = "{\"event\": \"APPROVE\"}"
+    return requests.post(endpoint, data=body, headers=headers)
+
+
+def merge_pr(pr_url):
+    pr_info = extract_pr_info(pr_url)
+    endpoint = "https://api.github.com/repos/{owner}/{repo}/pulls/{pull_nr}/merge"
+    endpoint = endpoint.format(owner=pr_info[0], repo=pr_info[1], pull_nr=pr_info[2])
+    token = keyring.get_password(SERVICE_AND_USER, SERVICE_AND_USER)
+    headers = {"Authorization": "Bearer " + token,
+               "Accept": "application/vnd.github.v3+json"}
+    return requests.put(endpoint, headers=headers)
 
 
 def convert_response(repos):
@@ -95,7 +127,8 @@ def print_header():
           "| URL".ljust(URL_WIDTH) +
           "| Repository".ljust(REPO_WIDTH) +
           "| Author".ljust(AUTHOR_WIDTH) +
-          "| Created".ljust(CREATED_WIDTH))
+          "| Created".ljust(CREATED_WIDTH) +
+          "| State".ljust(CREATED_WIDTH))
     print("=".ljust(200, '='))
 
 
@@ -104,7 +137,8 @@ def print_line(pr):
            pr["url"][0:URL_WIDTH - 2].ljust(URL_WIDTH) + \
            pr["name"][0:REPO_WIDTH - 2].ljust(REPO_WIDTH) + \
            pr["user"][0:AUTHOR_WIDTH - 2].ljust(AUTHOR_WIDTH) + \
-           pr["createdAt"][0:CREATED_WIDTH]
+           pr["createdAt"][0:CREATED_WIDTH - 2].ljust(CREATED_WIDTH) + \
+           pr["reviewDecision"]
     print(line)
 
 
@@ -112,6 +146,10 @@ def parse_arguments():
     parser.add_argument("-T", "--token", nargs='?', type=str, help="Update personal token")
     parser.add_argument("-o", "--organization", nargs='?', type=str, help="Update organization")
     parser.add_argument("-t", "--team", nargs='?', type=str, help="Update team")
+    parser.add_argument("-a", "--auto_approved_user", nargs='?', type=str,
+                        help="Automatically approve PRs by user given")
+    parser.add_argument("-m", "--auto_merge", nargs='?', type=str,
+                        help="Also try to merge PRs which are approved")
     parser.add_argument("-s", "--sort", nargs='?', type=str, default="createdAt",
                         help="What to sort by (createdAt,repo,user). Default: createdAt")
     return parser.parse_args()
@@ -141,19 +179,19 @@ def exit_if_config_not_set():
 parser = argparse.ArgumentParser()
 args = parse_arguments()
 configs = Properties()
-if not os.path.exists("open-prs.properties"):
+if not os.path.exists("config.properties"):
     exit_if_config_not_set()
     write_configuration()
     print("Configuration updated successfully")
-
-if args.organization is not None or args.team is not None:
-    exit_if_config_not_set()
-    write_configuration()
-    print("Configuration updated successfully")
+else:
+    if args.organization is not None or args.team is not None:
+        exit_if_config_not_set()
+        write_configuration()
+        print("Configuration updated successfully")
 
 with open(PROPERTIES_FILE, 'rb') as config_file:
     configs.load(config_file)
-    if configs.get("organization") is None or configs.get("team") is None:
+    if configs.get(ORGANIZATION) is None or configs.get("team") is None:
         print("Configuration missing, please enter organization & team")
         parser.print_help()
 
@@ -172,14 +210,18 @@ if keyring.get_password(SERVICE_AND_USER, SERVICE_AND_USER) is None:
 organization = configs.get(ORGANIZATION)[0]
 team = configs.get(TEAM)[0]
 
-query = get_query() \
-    .replace("$ORGANIZATION", organization)\
-    .replace("$TEAM", team)
-
-response = github_request(query)
+response = fetch_github_info(get_query())
 
 try:
-    repos = json.loads(response.text)["data"]["organization"][TEAM]["repositories"]["edges"]
+    repoData = json.loads(response.text)["data"][ORGANIZATION][TEAM]["repositories"]
+    moreData = repoData["pageInfo"]["hasNextPage"]
+    repos = repoData["edges"]
+    while moreData:
+        response = fetch_github_info(get_query(repoData["pageInfo"]["endCursor"]))
+        repoData = json.loads(response.text)["data"][ORGANIZATION][TEAM]["repositories"]
+        moreData = repoData["pageInfo"]["hasNextPage"]
+        repos.append(repoData["edges"])
+
 except KeyError:
     print("Unable to parse github-response. Check your config & token. Got:")
     print(response.text)
@@ -190,5 +232,27 @@ pr_list = convert_response(repos)
 sorted_list = sorted(pr_list, key=lambda k: k[args.sort])
 print_header()
 
+approval_prs = list()
 for pr in sorted_list:
+    if args.auto_approved_user is None:
+        print_line(pr)
+    else:
+        if pr["user"] == args.auto_approved_user:
+            approval_prs.append(pr)
+
+for pr in approval_prs:
     print_line(pr)
+print("=".ljust(200, '='))
+
+if len(approval_prs) > 0:
+    approve_approvals = input("Do you want to approve the following PRs? (y/n): ")
+    if approve_approvals == "y" or approve_approvals == "Y":
+        print("Approving PRs...")
+        for pr in approval_prs:
+            approve_response = approve_pr(pr["url"])
+            if approve_response.status_code == 200:
+                state = json.loads(approve_response.text)["state"]
+                print(format("Approved <{pr}> State after approval: <{state}>", pr=pr["title"], state=state))
+            else:
+                print("Error trying to approve: ")
+                print(json.loads(approve_response.text)["errors"])
