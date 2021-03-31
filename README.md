@@ -1,34 +1,32 @@
-# open-prs
-Utility to find open PRs in Github for a team.
+# github-fairy
+Utility for teams with many repositories where automated pull requests are common. <br>
+
+`github-fairy` uses Githubs graphql api together with api for reviewing and merging in a way to be able to efficiently handle  many PRs from for example `dependabot`. 
+
+- Finds open PRs for repositories that your team has write access to
+- Option to auto-approve a list of PRs by a specific user (like dependabot or other bot)
+
 Created to learn some Python and do some good at the same time!
 
 ## Configuration
-Still at a very rudamental stage, so you will need to update `open-prs.sh` with your organization & team name. <br>
 A personal github token needs to be created with the following scopes:
 
 <ul>
   <li>repo</li>
   <li>read:org</li>
-  <li>read:public_key</li>
-  <li>read:repo_hook</li>
-  <li>user</li>
-  <li>read:gpg_key</li>
+  <li>admin:repo_hook</li>
+  <li>read:user</li>
 </ul>
 
-The current implementation uses `secret-tool` in order to provide the token.
-You can add your token to `secret-tool` using 
-```
-> secret-tool store fehlhabers open-prs
-```
-Otherwise, just pipe the token into the python-script.
-
-## Usage
+## Usage examples
 ```commandline
-> ./open-prs.sh <sort by>
+First time usage for configuration
+> ./open-prs.py -t my-team -o mu-organization -T <my-token-here>
 
-EXAMPLE:
-> ./open-prs.sh date
+Auto approve all dependabot-PR:s (list of PRs shown before confirmation)
+
+> ./open-prs.sh -a dependabot
 ```
 ## Acknowledgements
-The solution was originally done by https://github.com/DeviesDevelopment/github-pr-tool/ <br>
-This script provides a CLI interface with similar capabilities.
+The solution was inspired by https://github.com/DeviesDevelopment/github-pr-tool/ <br>
+This script provides a CLI interface that builds the automatic approval on top of it.
