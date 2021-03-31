@@ -63,7 +63,7 @@ def get_query(end_cursor=""):
     }"
     }"""
     if end_cursor != "":
-        graph_query = graph_query.replace("$AFTER", "after: " + end_cursor)
+        graph_query = graph_query.replace("$AFTER", "after: \\\"" + end_cursor + "\\\"")
     else:
         graph_query = graph_query.replace("$AFTER", "")
 
@@ -111,6 +111,7 @@ def merge_pr(pr_url):
 def convert_response(repos):
     converted_pr_list = []
     for repo in repos:
+        print(repo)
         name = repo["node"]["name"]
         prs = repo["node"]["pullRequests"]["edges"]
         for pr_node in prs:
@@ -212,6 +213,7 @@ team = configs.get(TEAM)[0]
 
 response = fetch_github_info(get_query())
 
+repos = list()
 try:
     repoData = json.loads(response.text)["data"][ORGANIZATION][TEAM]["repositories"]
     moreData = repoData["pageInfo"]["hasNextPage"]
@@ -220,7 +222,7 @@ try:
         response = fetch_github_info(get_query(repoData["pageInfo"]["endCursor"]))
         repoData = json.loads(response.text)["data"][ORGANIZATION][TEAM]["repositories"]
         moreData = repoData["pageInfo"]["hasNextPage"]
-        repos.append(repoData["edges"])
+        repos += repoData["edges"]
 
 except KeyError:
     print("Unable to parse github-response. Check your config & token. Got:")
@@ -252,7 +254,7 @@ if len(approval_prs) > 0:
             approve_response = approve_pr(pr["url"])
             if approve_response.status_code == 200:
                 state = json.loads(approve_response.text)["state"]
-                print(format("Approved <{pr}> State after approval: <{state}>", pr=pr["title"], state=state))
+                print("{pr} : <{state}>".format(pr=pr["title"], state=state))
             else:
                 print("Error trying to approve: ")
                 print(json.loads(approve_response.text)["errors"])
