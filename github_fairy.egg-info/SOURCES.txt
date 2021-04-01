@@ -1,8 +1,0 @@
-README.md
-github-fairy.py
-setup.py
-github_fairy.egg-info/PKG-INFO
-github_fairy.egg-info/SOURCES.txt
-github_fairy.egg-info/dependency_links.txt
-github_fairy.egg-info/requires.txt
-github_fairy.egg-info/top_level.txt
